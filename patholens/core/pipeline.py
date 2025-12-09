@@ -72,9 +72,13 @@ def run_analysis_pipeline(
     results['patch_probabilities'] = patch_probs
 
     # 4. Heatmap
+    # Step 3: Generate heatmap
     update_status(85, "Generating probability heatmap...")
-    overlay, prob_map, heatmap_stats = heatmap_generator.generate(image, predictions)
-    results['heatmap_overlay'] = overlay
+    # UPDATED: Unpack 4 values instead of 3
+    overlay_abs, overlay_rel, prob_map, heatmap_stats = heatmap_generator.generate(image, predictions)
+    
+    results['heatmap_overlay'] = overlay_abs        # Default absolute
+    results['heatmap_overlay_relative'] = overlay_rel # Boosted visibility
     results['probability_map'] = prob_map
     results['heatmap_stats'] = heatmap_stats
 
