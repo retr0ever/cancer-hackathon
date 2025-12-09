@@ -85,7 +85,7 @@ ANALYSIS FINDINGS:
 - Overall Cancer Probability: {findings.cancer_probability:.1%}
 - Estimated Malignant Cell Count: {findings.malignant_cell_count} (±{findings.malignant_cell_count_uncertainty:.0%})
 - Grade Distribution: Grade 1: {findings.grade_estimate.get('grade_1', 0):.1%}, Grade 2: {findings.grade_estimate.get('grade_2', 0):.1%}, Grade 3: {findings.grade_estimate.get('grade_3', 0):.1%}
-- Primary Grade Estimate: Grade {findings.primary_grade}
+- Most Probable Grade: Grade {findings.primary_grade}
 - High-Risk Regions Detected: {findings.high_risk_regions}
 - Nuclear Pleomorphism: {findings.nuclear_pleomorphism}
 - Nuclear Atypia: {findings.nuclear_atypia}

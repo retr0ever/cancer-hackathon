@@ -326,15 +326,16 @@ def format_grade_report(estimate: GradeEstimate) -> str:
         "TUMOUR GRADE ESTIMATION",
         "=" * 40,
         "",
-        f"Primary Grade: Grade {estimate.primary_grade}",
-        f"Confidence: {estimate.confidence:.1%}",
+        f"Most Probable Grade: Grade {estimate.primary_grade}",
+        f"Probability gap vs. next grade: {estimate.confidence:.1%}",
         "",
         "Grade Probabilities:",
         f"  Grade 1 (Well-differentiated):     {estimate.grade_1:.1%}",
         f"  Grade 2 (Moderately-differentiated): {estimate.grade_2:.1%}",
         f"  Grade 3 (Poorly-differentiated):   {estimate.grade_3:.1%}",
         "",
-        "Note: This estimate is for research demonstration only.",
+        "Note: This per-case probability gap reflects separation between top grades, not overall model accuracy.",
+        "      This estimate is for research demonstration only.",
         "      Not intended for clinical use."
     ]
 
