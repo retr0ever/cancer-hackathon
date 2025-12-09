@@ -3,6 +3,9 @@ Heatmap Generation Module for PathoLens
 
 Creates cancer probability heatmaps by analysing patches across
 the whole slide image and reconstructing a spatial probability map.
+
+Uses scipy for smooth bicubic interpolation to produce publication-quality
+heatmaps from sparse patch predictions.
 """
 
 import numpy as np
@@ -12,6 +15,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from typing import Tuple, List, Optional, Dict
 from dataclasses import dataclass
+from scipy import ndimage
+from scipy.interpolate import RectBivariateSpline
 import torch
 
 
@@ -30,28 +35,33 @@ class PatchPrediction:
 class HeatmapGenerator:
     """
     Generates cancer probability heatmaps from patch predictions.
+
+    Uses scipy bicubic interpolation for smooth, publication-quality output.
     """
 
     def __init__(
         self,
-        colormap: str = 'RdYlBu_r',
-        alpha: float = 0.5,
+        colormap: str = 'magma',
+        alpha: float = 0.6,
         threshold: float = 0.0,
-        smooth_sigma: float = 2.0
+        smooth_sigma: float = 8.0,
+        use_interpolation: bool = True
     ):
         """
         Initialise the heatmap generator.
 
         Args:
-            colormap: Matplotlib colormap name
+            colormap: Matplotlib colormap name (magma, viridis, inferno recommended)
             alpha: Opacity for overlay (0-1)
             threshold: Minimum probability to display
-            smooth_sigma: Gaussian smoothing sigma
+            smooth_sigma: Gaussian smoothing sigma (higher = smoother)
+            use_interpolation: Use bicubic interpolation for smooth scaling
         """
         self.colormap = colormap
         self.alpha = alpha
         self.threshold = threshold
         self.smooth_sigma = smooth_sigma
+        self.use_interpolation = use_interpolation
 
     def create_probability_map(
         self,
@@ -59,33 +69,96 @@ class HeatmapGenerator:
         original_size: Tuple[int, int]
     ) -> np.ndarray:
         """
-        Create a probability map from patch predictions.
+        Create a smooth probability map from patch predictions using interpolation.
 
         Args:
             predictions: List of patch predictions
             original_size: (width, height) of original image
 
         Returns:
-            2D probability map
+            2D probability map at full resolution
         """
+        if not predictions:
+            return np.zeros((original_size[1], original_size[0]), dtype=np.float32)
+
         width, height = original_size
-        prob_map = np.zeros((height, width), dtype=np.float32)
-        count_map = np.zeros((height, width), dtype=np.float32)
+
+        # Extract patch centres and probabilities
+        patch_size = predictions[0].width
+        stride = patch_size  # Assume non-overlapping for grid
+
+        # Detect actual stride from predictions
+        if len(predictions) > 1:
+            x_coords = sorted(set(p.x for p in predictions))
+            if len(x_coords) > 1:
+                stride = x_coords[1] - x_coords[0]
+
+        # Create low-resolution grid
+        grid_w = (width + stride - 1) // stride
+        grid_h = (height + stride - 1) // stride
+
+        low_res_map = np.zeros((grid_h, grid_w), dtype=np.float32)
+        count_map = np.zeros((grid_h, grid_w), dtype=np.float32)
 
         for pred in predictions:
-            # Ensure coordinates are within bounds
-            x_end = min(pred.x + pred.width, width)
-            y_end = min(pred.y + pred.height, height)
+            gx = pred.x // stride
+            gy = pred.y // stride
+            if 0 <= gx < grid_w and 0 <= gy < grid_h:
+                low_res_map[gy, gx] += pred.cancer_probability
+                count_map[gy, gx] += 1
 
-            # Add probability to the region
-            prob_map[pred.y:y_end, pred.x:x_end] += pred.cancer_probability
-            count_map[pred.y:y_end, pred.x:x_end] += 1
+        # Average overlapping predictions
+        count_map[count_map == 0] = 1
+        low_res_map = low_res_map / count_map
 
-        # Average overlapping regions
-        count_map[count_map == 0] = 1  # Avoid division by zero
-        prob_map = prob_map / count_map
+        # Upscale using bicubic interpolation
+        if self.use_interpolation and low_res_map.size > 1:
+            prob_map = self._bicubic_upscale(low_res_map, (height, width))
+        else:
+            prob_map = cv2.resize(low_res_map, (width, height), interpolation=cv2.INTER_LINEAR)
 
         return prob_map
+
+    def _bicubic_upscale(
+        self,
+        low_res: np.ndarray,
+        target_size: Tuple[int, int]
+    ) -> np.ndarray:
+        """
+        Upscale using scipy bicubic spline interpolation.
+
+        Args:
+            low_res: Low resolution probability grid
+            target_size: (height, width) of target
+
+        Returns:
+            Smoothly interpolated high-resolution map
+        """
+        h_low, w_low = low_res.shape
+        h_high, w_high = target_size
+
+        if h_low < 2 or w_low < 2:
+            return cv2.resize(low_res, (w_high, h_high), interpolation=cv2.INTER_LINEAR)
+
+        # Create coordinate grids
+        y_low = np.linspace(0, 1, h_low)
+        x_low = np.linspace(0, 1, w_low)
+
+        y_high = np.linspace(0, 1, h_high)
+        x_high = np.linspace(0, 1, w_high)
+
+        # Bicubic spline interpolation
+        try:
+            spline = RectBivariateSpline(y_low, x_low, low_res, kx=3, ky=3)
+            high_res = spline(y_high, x_high)
+        except Exception:
+            # Fallback to scipy zoom
+            zoom_y = h_high / h_low
+            zoom_x = w_high / w_low
+            high_res = ndimage.zoom(low_res, (zoom_y, zoom_x), order=3)
+
+        # Clip to valid probability range
+        return np.clip(high_res, 0, 1).astype(np.float32)
 
     def smooth_heatmap(self, prob_map: np.ndarray) -> np.ndarray:
         """

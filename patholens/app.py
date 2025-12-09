@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from models.load_model import load_cancer_classifier, get_device, get_model_info
 from models.classifier import CancerClassifier
+from models.pcam_model import PCamPredictor, load_pcam_model
 from models.segmentation import NucleiSegmenter, compute_nuclei_statistics
 from models.heatmap import HeatmapGenerator, PatchPrediction
 from utils.patching import PatchExtractor
@@ -51,124 +52,199 @@ st.set_page_config(
 # Custom CSS for clean styling
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+    * {
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
     .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1a1a2e;
+        font-size: 2.2rem;
+        font-weight: 600;
+        color: #2d3748;
         margin-bottom: 0.5rem;
-        font-family: 'Inter', 'Helvetica Neue', sans-serif;
+        font-family: 'JetBrains Mono', monospace;
+        letter-spacing: -0.02em;
     }
     .sub-header {
-        font-size: 1.1rem;
-        color: #4a4a6a;
+        font-size: 1rem;
+        color: #718096;
         margin-bottom: 2rem;
-        font-family: 'Inter', 'Helvetica Neue', sans-serif;
+        font-family: 'JetBrains Mono', monospace;
     }
     .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background-color: #f7fafc;
+        border: 1px solid #e2e8f0;
         padding: 1.5rem;
-        border-radius: 12px;
-        color: white;
+        border-radius: 8px;
         margin: 0.5rem 0;
     }
     .metric-value {
-        font-size: 2rem;
-        font-weight: 700;
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #2d3748;
     }
     .metric-label {
-        font-size: 0.9rem;
-        opacity: 0.9;
+        font-size: 0.85rem;
+        color: #718096;
     }
     .info-box {
-        background-color: #f8f9fa;
-        border-left: 4px solid #667eea;
+        background-color: #f7fafc;
+        border-left: 3px solid #4a5568;
         padding: 1rem;
         margin: 1rem 0;
-        border-radius: 0 8px 8px 0;
+        border-radius: 0 6px 6px 0;
+        font-family: 'JetBrains Mono', monospace;
     }
     .warning-box {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
+        background-color: #f7fafc;
+        border-left: 3px solid #a0aec0;
         padding: 1rem;
         margin: 1rem 0;
-        border-radius: 0 8px 8px 0;
+        border-radius: 0 6px 6px 0;
+        color: #4a5568;
+    }
+    .warning-box strong {
+        color: #4a5568;
+        font-weight: 600;
     }
     .grade-bar {
-        height: 24px;
-        border-radius: 4px;
+        height: 20px;
+        border-radius: 3px;
         margin: 4px 0;
     }
     .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        background-color: #4a5568;
+        color: #f7fafc;
         border: none;
         padding: 0.75rem 2rem;
-        font-size: 1rem;
-        font-weight: 600;
-        border-radius: 8px;
-        transition: transform 0.2s, box-shadow 0.2s;
+        font-size: 0.9rem;
+        font-weight: 500;
+        border-radius: 6px;
+        font-family: 'JetBrains Mono', monospace;
+        transition: background-color 0.2s;
     }
     .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        background-color: #718096;
     }
     .disclaimer {
-        background-color: #ffe0e0;
-        border: 1px solid #ff6b6b;
+        background-color: #f7fafc;
+        border: 1px solid #a0aec0;
         padding: 1rem;
-        border-radius: 8px;
+        border-radius: 6px;
         margin: 1rem 0;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
+        color: #4a5568;
+    }
+    .disclaimer strong {
+        color: #4a5568;
+        font-weight: 600;
+    }
+
+    /* Sidebar styling */
+    .css-1d391kg, [data-testid="stSidebar"] {
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Override Streamlit defaults */
+    .stMarkdown, .stText, p, span, label, .stSelectbox, .stSlider {
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'JetBrains Mono', monospace !important;
+        color: #2d3748;
+    }
+
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        color: #2d3748;
+    }
+
+    [data-testid="stMetricLabel"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        color: #718096;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 @st.cache_resource
-def load_models():
+def load_models(use_pcam: bool = True):
     """Load and cache the ML models."""
     device = get_device()
-    classifier_model = load_cancer_classifier(device=device)
-    return classifier_model, device
+    if use_pcam:
+        predictor = load_pcam_model(device=device)
+        return predictor, device, 'pcam'
+    else:
+        classifier_model = load_cancer_classifier(device=device)
+        return classifier_model, device, 'resnet'
 
 
 def create_sidebar():
     """Create the sidebar with settings and information."""
     with st.sidebar:
+        st.markdown("### Model Selection")
+
+        use_pcam = st.checkbox(
+            "Use PCam Model",
+            value=True,
+            help="Use PatchCamelyon-optimised model (96x96 patches)"
+        )
+
+        st.markdown("---")
         st.markdown("### Analysis Settings")
 
-        patch_size = st.slider(
-            "Patch Size",
-            min_value=128,
-            max_value=512,
-            value=224,
-            step=32,
-            help="Size of patches for analysis (pixels)"
-        )
-
-        stride = st.slider(
-            "Stride",
-            min_value=32,
-            max_value=224,
-            value=112,
-            step=16,
-            help="Step size between patches (smaller = more overlap)"
-        )
+        if use_pcam:
+            patch_size = st.slider(
+                "Patch Size",
+                min_value=64,
+                max_value=128,
+                value=96,
+                step=16,
+                help="PCam uses 96x96 patches"
+            )
+            stride = st.slider(
+                "Stride",
+                min_value=24,
+                max_value=96,
+                value=48,
+                step=12,
+                help="Smaller stride = denser, smoother heatmap"
+            )
+        else:
+            patch_size = st.slider(
+                "Patch Size",
+                min_value=128,
+                max_value=512,
+                value=224,
+                step=32,
+                help="Size of patches for analysis (pixels)"
+            )
+            stride = st.slider(
+                "Stride",
+                min_value=32,
+                max_value=224,
+                value=112,
+                step=16,
+                help="Step size between patches"
+            )
 
         min_tissue = st.slider(
             "Minimum Tissue Fraction",
             min_value=0.1,
             max_value=0.9,
-            value=0.5,
+            value=0.3,
             step=0.1,
             help="Minimum tissue content required in patch"
         )
 
         heatmap_alpha = st.slider(
             "Heatmap Opacity",
-            min_value=0.1,
-            max_value=0.9,
-            value=0.5,
+            min_value=0.2,
+            max_value=0.8,
+            value=0.6,
             step=0.1,
             help="Transparency of heatmap overlay"
         )
@@ -176,10 +252,16 @@ def create_sidebar():
         st.markdown("---")
         st.markdown("### Model Information")
 
-        model_info = get_model_info()
-        st.markdown(f"**Classifier:** {model_info['classifier']['architecture']}")
-        st.markdown(f"**Input Size:** {model_info['classifier']['input_size'][0]}x{model_info['classifier']['input_size'][1]}")
-        st.markdown(f"**Segmentation:** {model_info['segmentation']['method'][:30]}...")
+        if use_pcam:
+            st.markdown("**Model:** PCam ResNet18")
+            st.markdown("**Input:** 96x96 patches")
+            st.markdown("**Task:** Tumour detection")
+            st.markdown("**Segmentation:** Colour deconvolution")
+        else:
+            model_info = get_model_info()
+            st.markdown(f"**Classifier:** {model_info['classifier']['architecture']}")
+            st.markdown(f"**Input Size:** {model_info['classifier']['input_size'][0]}x{model_info['classifier']['input_size'][1]}")
+            st.markdown(f"**Segmentation:** {model_info['segmentation']['method'][:30]}...")
 
         st.markdown("---")
         st.markdown("### About PathoLens")
@@ -196,13 +278,14 @@ def create_sidebar():
             'patch_size': patch_size,
             'stride': stride,
             'min_tissue': min_tissue,
-            'heatmap_alpha': heatmap_alpha
+            'heatmap_alpha': heatmap_alpha,
+            'use_pcam': use_pcam
         }
 
 
 def run_analysis(
     image: Image.Image,
-    classifier_model: torch.nn.Module,
+    model_or_predictor,
     device: torch.device,
     settings: Dict
 ) -> Dict:
@@ -211,7 +294,7 @@ def run_analysis(
 
     Args:
         image: Input histopathology image
-        classifier_model: Loaded classifier model
+        model_or_predictor: Loaded classifier model or PCamPredictor
         device: Torch device
         settings: Analysis settings from sidebar
 
@@ -219,16 +302,31 @@ def run_analysis(
         Dictionary containing all analysis results
     """
     results = {}
+    use_pcam = settings.get('use_pcam', True)
 
-    # Initialise components
-    classifier = CancerClassifier(classifier_model, device)
+    # Initialise components based on model type
+    # Check if it's already a predictor with predict_batch method
+    if use_pcam and hasattr(model_or_predictor, 'predict_batch') and hasattr(model_or_predictor, 'model'):
+        # It's a PCamPredictor - use directly
+        predictor = model_or_predictor
+    elif hasattr(model_or_predictor, 'predict_batch'):
+        # It's already a classifier with predict_batch
+        predictor = model_or_predictor
+    else:
+        # It's a raw model - wrap with CancerClassifier
+        predictor = CancerClassifier(model_or_predictor, device)
+
     patch_extractor = PatchExtractor(
         patch_size=settings['patch_size'],
         stride=settings['stride'],
         min_tissue_fraction=settings['min_tissue']
     )
     segmenter = NucleiSegmenter()
-    heatmap_generator = HeatmapGenerator(alpha=settings['heatmap_alpha'])
+    heatmap_generator = HeatmapGenerator(
+        alpha=settings['heatmap_alpha'],
+        smooth_sigma=12.0,  # Smoother heatmaps
+        colormap='magma'
+    )
     grader = TumourGrader()
 
     # Progress tracking
@@ -250,11 +348,11 @@ def run_analysis(
     predictions = []
     patch_probs = []
 
-    batch_size = 16
+    batch_size = 32 if use_pcam else 16
     for i in range(0, len(patches), batch_size):
         batch = patches[i:i+batch_size]
         batch_images = [p.image for p in batch]
-        batch_results = classifier.predict_batch(batch_images)
+        batch_results = predictor.predict_batch(batch_images)
 
         for j, (prob, pred_class) in enumerate(batch_results):
             patch = batch[j]
@@ -445,21 +543,192 @@ def display_results(results: Dict, original_image: Image.Image):
 
     st.markdown("---")
 
-    # Explanation box
+    # Enhanced Analysis Interpretation UI
     st.markdown("### Analysis Interpretation")
 
-    st.markdown("""
-    <div class="info-box">
+    # Extract key metrics for display
+    mean_prob = results['heatmap_stats']['mean_probability']
+    grade = results['grade_estimate']
+    gf = results['grading_features']
+    nstats = results['nuclei_stats']
+
+    # Risk level determination
+    if mean_prob < 0.3:
+        risk_level = "Low"
+        risk_colour = "#48bb78"
+    elif mean_prob < 0.6:
+        risk_level = "Moderate"
+        risk_colour = "#ecc94b"
+    else:
+        risk_level = "Elevated"
+        risk_colour = "#f56565"
+
+    # Key Findings Cards
+    st.markdown(f"""
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0;">
+        <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; text-align: center;">
+            <div style="font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Risk Assessment</div>
+            <div style="font-size: 1.5rem; font-weight: 600; color: {risk_colour};">{risk_level}</div>
+            <div style="font-size: 0.8rem; color: #a0aec0;">{mean_prob:.1%} probability</div>
+        </div>
+        <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; text-align: center;">
+            <div style="font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Predicted Grade</div>
+            <div style="font-size: 1.5rem; font-weight: 600; color: #2d3748;">Grade {grade.primary_grade}</div>
+            <div style="font-size: 0.8rem; color: #a0aec0;">{grade.confidence:.0%} confidence</div>
+        </div>
+        <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; text-align: center;">
+            <div style="font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Cellular Analysis</div>
+            <div style="font-size: 1.5rem; font-weight: 600; color: #2d3748;">{results['malignant_cell_count']}</div>
+            <div style="font-size: 0.8rem; color: #a0aec0;">suspected malignant cells</div>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
 
-    st.text(results['explanation'])
+    # Analysis Flow Diagram (SVG)
+    st.markdown("""
+    <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0;">
+        <div style="font-size: 0.85rem; font-weight: 600; color: #4a5568; margin-bottom: 1rem;">Analysis Pipeline</div>
+        <svg viewBox="0 0 800 80" style="width: 100%; height: auto;">
+            <!-- Boxes -->
+            <rect x="0" y="20" width="120" height="40" rx="6" fill="#e2e8f0" stroke="#a0aec0"/>
+            <rect x="170" y="20" width="120" height="40" rx="6" fill="#e2e8f0" stroke="#a0aec0"/>
+            <rect x="340" y="20" width="120" height="40" rx="6" fill="#e2e8f0" stroke="#a0aec0"/>
+            <rect x="510" y="20" width="120" height="40" rx="6" fill="#e2e8f0" stroke="#a0aec0"/>
+            <rect x="680" y="20" width="120" height="40" rx="6" fill="#4a5568" stroke="#2d3748"/>
 
-    st.markdown("</div>", unsafe_allow_html=True)
+            <!-- Arrows -->
+            <path d="M125 40 L165 40" stroke="#a0aec0" stroke-width="2" marker-end="url(#arrow)"/>
+            <path d="M295 40 L335 40" stroke="#a0aec0" stroke-width="2" marker-end="url(#arrow)"/>
+            <path d="M465 40 L505 40" stroke="#a0aec0" stroke-width="2" marker-end="url(#arrow)"/>
+            <path d="M635 40 L675 40" stroke="#a0aec0" stroke-width="2" marker-end="url(#arrow)"/>
+
+            <!-- Arrow marker -->
+            <defs>
+                <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#a0aec0"/>
+                </marker>
+            </defs>
+
+            <!-- Labels -->
+            <text x="60" y="45" text-anchor="middle" fill="#4a5568" font-size="11" font-family="JetBrains Mono, monospace">Patch Extract</text>
+            <text x="230" y="45" text-anchor="middle" fill="#4a5568" font-size="11" font-family="JetBrains Mono, monospace">Classification</text>
+            <text x="400" y="45" text-anchor="middle" fill="#4a5568" font-size="11" font-family="JetBrains Mono, monospace">Segmentation</text>
+            <text x="570" y="45" text-anchor="middle" fill="#4a5568" font-size="11" font-family="JetBrains Mono, monospace">Grading</text>
+            <text x="740" y="45" text-anchor="middle" fill="#f7fafc" font-size="11" font-family="JetBrains Mono, monospace">Result</text>
+        </svg>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Detailed Findings in columns
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; height: 100%;">
+            <div style="font-size: 0.85rem; font-weight: 600; color: #4a5568; margin-bottom: 1rem;">Nuclear Morphology</div>
+        """, unsafe_allow_html=True)
+
+        # Pleomorphism indicator
+        pleo_pct = gf.nuclear_pleomorphism_score * 100
+        st.markdown(f"""
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Pleomorphism</span>
+                    <span>{gf.nuclear_pleomorphism_score:.2f}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #4a5568; height: 100%; width: {pleo_pct}%;"></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Atypia indicator
+        atypia_pct = gf.nuclear_atypia_score * 100
+        st.markdown(f"""
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Atypia</span>
+                    <span>{gf.nuclear_atypia_score:.2f}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #4a5568; height: 100%; width: {atypia_pct}%;"></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Heterogeneity indicator
+        het_pct = gf.texture_heterogeneity * 100
+        st.markdown(f"""
+            <div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Heterogeneity</span>
+                    <span>{gf.texture_heterogeneity:.2f}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #4a5568; height: 100%; width: {het_pct}%;"></div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+        <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; height: 100%;">
+            <div style="font-size: 0.85rem; font-weight: 600; color: #4a5568; margin-bottom: 1rem;">Grade Distribution</div>
+        """, unsafe_allow_html=True)
+
+        # Grade 1
+        st.markdown(f"""
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Grade 1 (Well-diff.)</span>
+                    <span>{grade.grade_1:.1%}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #48bb78; height: 100%; width: {grade.grade_1 * 100}%;"></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Grade 2
+        st.markdown(f"""
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Grade 2 (Mod.-diff.)</span>
+                    <span>{grade.grade_2:.1%}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #ecc94b; height: 100%; width: {grade.grade_2 * 100}%;"></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Grade 3
+        st.markdown(f"""
+            <div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #718096; margin-bottom: 0.25rem;">
+                    <span>Grade 3 (Poorly-diff.)</span>
+                    <span>{grade.grade_3:.1%}</span>
+                </div>
+                <div style="background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden;">
+                    <div style="background: #f56565; height: 100%; width: {grade.grade_3 * 100}%;"></div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # AI Interpretation (collapsible)
+    with st.expander("View AI Interpretation", expanded=False):
+        st.markdown("""
+        <div style="background: #f7fafc; border-radius: 8px; padding: 1rem; font-size: 0.85rem; line-height: 1.6; color: #4a5568;">
+        """, unsafe_allow_html=True)
+        st.write(results['explanation'])
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Disclaimer
     st.markdown("""
-    <div class="disclaimer">
-        <strong>Research Use Only:</strong> This analysis is generated by a computational model
+    <div style="background: #f7fafc; border: 1px solid #a0aec0; border-radius: 6px; padding: 1rem; margin-top: 1.5rem; font-size: 0.8rem; color: #4a5568;">
+        <strong style="color: #4a5568;">Research Use Only</strong> &mdash; This analysis is generated by a computational model
         and is intended for research demonstration purposes only. It should not be used for
         clinical diagnosis, treatment decisions, or as a substitute for professional medical
         advice. All findings require validation by a qualified pathologist.
@@ -486,12 +755,12 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Load models
-    with st.spinner("Loading models..."):
-        classifier_model, device = load_models()
-
-    # Sidebar settings
+    # Sidebar settings (must come first to determine model type)
     settings = create_sidebar()
+
+    # Load models based on settings
+    with st.spinner("Loading models..."):
+        model_or_predictor, device, model_type = load_models(use_pcam=settings['use_pcam'])
 
     # Main content
     st.markdown("### Upload Histopathology Image")
@@ -539,7 +808,7 @@ def main():
 
         if analyse_button:
             with st.spinner("Running analysis pipeline..."):
-                results = run_analysis(image, classifier_model, device, settings)
+                results = run_analysis(image, model_or_predictor, device, settings)
 
                 if results:
                     # Store results in session state for persistence
