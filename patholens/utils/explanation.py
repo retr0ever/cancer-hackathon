@@ -11,10 +11,22 @@ Set your key in a .env file or environment variable.
 import os
 from typing import Dict, Optional, List
 from dataclasses import dataclass
+from pathlib import Path
 
-# TODO: Install python-dotenv and uncomment when ready
-# from dotenv import load_dotenv
-# load_dotenv()
+# Load environment variables from .env file
+from dotenv import load_dotenv
+
+# Try multiple locations for .env file
+_env_locations = [
+    Path(__file__).parent.parent / '.env',           # patholens/.env
+    Path(__file__).parent.parent.parent / '.env',    # parent directory/.env
+    Path.cwd() / '.env',                              # current working directory
+]
+
+for _env_path in _env_locations:
+    if _env_path.exists():
+        load_dotenv(_env_path)
+        break
 
 
 @dataclass

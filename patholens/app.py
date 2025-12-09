@@ -377,11 +377,11 @@ def display_results(results: Dict, original_image: Image.Image):
 
     with col1:
         st.markdown("**Original Image**")
-        st.image(original_image, use_container_width=True)
+        st.image(original_image, width="stretch")
 
     with col2:
         st.markdown("**Cancer Probability Heatmap**")
-        st.image(results['heatmap_overlay'], use_container_width=True)
+        st.image(results['heatmap_overlay'], width="stretch")
 
     # Colour scale legend
     st.markdown("""
@@ -515,10 +515,10 @@ def main():
 
     if uploaded_file is not None:
         image = Image.open(uploaded_file).convert('RGB')
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+        st.image(image, caption="Uploaded Image", width="stretch")
     elif use_sample and sample_path.exists():
         image = Image.open(sample_path).convert('RGB')
-        st.image(image, caption="Sample Image", use_container_width=True)
+        st.image(image, caption="Sample Image", width="stretch")
     elif use_sample:
         st.warning(
             f"Sample image not found at {sample_path}. "
@@ -534,7 +534,7 @@ def main():
             analyse_button = st.button(
                 "Analyse Slide",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
 
         if analyse_button:
