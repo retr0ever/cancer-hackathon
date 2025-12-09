@@ -85,12 +85,15 @@ def run_analysis_pipeline(
     # 5. Segmentation & Stats
     update_status(90, "Segmenting nuclei...")
     nuclei, labels, _ = segmenter.segment(image)
-    nuclei_stats = compute_nuclei_statistics(nuclei)
+    
+    # Use label map for statistics (more efficient and robust)
+    nuclei_stats = compute_nuclei_statistics(labels)
     results['nuclei_stats'] = nuclei_stats
     
     # Malignant count logic
     mean_prob = heatmap_stats['mean_probability']
-    results['malignant_cell_count'] = int(len(nuclei) * mean_prob)
+    # Use the count from stats, as 'nuclei' list might be empty for optimization
+    results['malignant_cell_count'] = int(nuclei_stats['count'] * mean_prob)
     results['malignant_cell_uncertainty'] = 0.15
 
     # 6. Grading

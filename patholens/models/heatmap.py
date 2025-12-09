@@ -26,6 +26,9 @@ class HeatmapGenerator:
             # Relative Mode: Stretch 0..Max -> 0..1
             max_val = np.max(prob_map)
             norm_map = prob_map / max_val if max_val > 0.01 else prob_map
+            
+            # Aggressive boost: Shift colors towards red
+            norm_map = np.power(norm_map, 0.7)
         else:
             # Absolute Mode: Strict 0..1
             norm_map = prob_map
@@ -38,11 +41,11 @@ class HeatmapGenerator:
         # We use the displayed intensity (norm_map) to determine opacity
         mask = norm_map
         if boost:
-            # In relative mode, make it pop more
-            mask = np.power(mask, 0.8) 
+            # In relative mode, make it pop more (lower power = higher opacity for mid-range)
+            mask = np.power(mask, 0.6) 
         
         # Cap opacity
-        mask = np.clip(mask * 1.5, 0, self.alpha)
+        mask = np.clip(mask * 2.0, 0, self.alpha)
         mask = np.stack([mask, mask, mask], axis=2)
 
         # 4. Blend

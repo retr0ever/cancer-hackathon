@@ -44,6 +44,7 @@ def render_overview_tab(results, original_image):
         heatmap_mode = st.radio(
             "Visualization Mode",
             ["Relative Probabilities", "Absolute Probabilities"],
+            index=1,  # Default to Absolute
             help="Relative: Stretches contrast so hotspots are visible even if low probability.\nAbsolute: Shows raw probability (may be invisible if risk is low)."
         )
     

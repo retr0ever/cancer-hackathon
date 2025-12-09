@@ -15,7 +15,7 @@ def train_model():
     # 1. Configuration
     BATCH_SIZE = 128
     LR = 0.001
-    EPOCHS = 3  # Increase to 10 for better results
+    EPOCHS = 10  # Increase to 10 for better results
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -25,8 +25,9 @@ def train_model():
     DataClass = PathMNIST
 
     data_transform = transforms.Compose([
+        transforms.Resize((96, 96)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[.5], std=[.5])
+        transforms.Normalize(mean=[.5, .5, .5], std=[.5, .5, .5])
     ])
 
     print("Downloading/Loading Data...")

@@ -117,7 +117,8 @@ class CancerClassifier:
 
     def preprocess(self, image: Image.Image) -> torch.Tensor:
         """Preprocess a PIL image for model input."""
-        tensor = self.transform(image)
+        # The histo_transform is generally better for H&E stained images
+        tensor = self.histo_transform(image)
         return tensor.unsqueeze(0).to(self.device)
 
     @torch.no_grad()
