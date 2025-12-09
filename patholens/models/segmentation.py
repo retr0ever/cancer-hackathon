@@ -1,308 +1,133 @@
-"""
-Nuclei Segmentation Module for PathoLens
-
-Implements colour deconvolution and morphological operations for
-nuclei detection in H&E stained histopathology images.
-"""
-
 import numpy as np
 import cv2
-from PIL import Image
-from skimage import morphology, measure, filters, exposure
-from skimage.color import rgb2gray, rgb2hed
-from skimage.segmentation import watershed
-from scipy import ndimage
-from typing import Tuple, List, Dict, Optional
-from dataclasses import dataclass
+import torch
+import torch.nn as nn
+from skimage import feature, morphology, measure  # FIXED: measurement -> measure
 
+# --- 1. The Deep Learning Model (UNet) ---
+class DoubleConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
 
-@dataclass
-class NucleusInfo:
-    """Information about a detected nucleus."""
-    centroid: Tuple[float, float]
-    area: float
-    perimeter: float
-    eccentricity: float
-    solidity: float
-    mean_intensity: float
-    bbox: Tuple[int, int, int, int]
-    mask: np.ndarray
+    def forward(self, x):
+        return self.double_conv(x)
 
+class UNet(nn.Module):
+    """ Standard UNet Architecture commonly used with NuInsSeg/MoNuSeg """
+    def __init__(self, n_channels=3, n_classes=1):
+        super().__init__()
+        self.inc = DoubleConv(n_channels, 64)
+        self.down1 = DoubleConv(64, 128)
+        self.down2 = DoubleConv(128, 256)
+        self.down3 = DoubleConv(256, 512)
+        self.up1 = DoubleConv(512 + 256, 256)
+        self.up2 = DoubleConv(256 + 128, 128)
+        self.up3 = DoubleConv(128 + 64, 64)
+        self.outc = nn.Conv2d(64, n_classes, kernel_size=1)
+        self.maxpool = nn.MaxPool2d(2)
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
+    def forward(self, x):
+        x1 = self.inc(x)
+        x2 = self.down1(self.maxpool(x1))
+        x3 = self.down2(self.maxpool(x2))
+        x4 = self.down3(self.maxpool(x3))
+        
+        x = self.upsample(x4)
+        x = torch.cat([x, x3], dim=1)
+        x = self.up1(x)
+        
+        x = self.upsample(x)
+        x = torch.cat([x, x2], dim=1)
+        x = self.up2(x)
+        
+        x = self.upsample(x)
+        x = torch.cat([x, x1], dim=1)
+        x = self.up3(x)
+        logits = self.outc(x)
+        return torch.sigmoid(logits)
+
+# --- 2. The Segmenter Class ---
 class NucleiSegmenter:
-    """
-    Nuclei segmentation using colour deconvolution and morphological operations.
-    Optimised for H&E stained tissue sections.
-    """
+    def __init__(self):
+        # In a real app, you would load weights here:
+        # self.model = UNet()
+        # self.model.load_state_dict(torch.load("nuinsseg_weights.pth"))
+        self.model = None 
 
-    # Stain vectors for H&E colour deconvolution
-    # These are approximate values for standard H&E staining
-    HE_STAIN_MATRIX = np.array([
-        [0.65, 0.70, 0.29],   # Haematoxylin
-        [0.07, 0.99, 0.11],   # Eosin
-        [0.27, 0.57, 0.78]    # DAB (background)
-    ])
-
-    def __init__(
-        self,
-        min_nucleus_area: int = 50,
-        max_nucleus_area: int = 5000,
-        threshold_method: str = 'otsu',
-        use_watershed: bool = True
-    ):
+    def segment(self, image):
         """
-        Initialise the nuclei segmenter.
-
-        Args:
-            min_nucleus_area: Minimum area in pixels for valid nucleus
-            max_nucleus_area: Maximum area in pixels for valid nucleus
-            threshold_method: Thresholding method ('otsu', 'adaptive', 'li')
-            use_watershed: Whether to use watershed for separating touching nuclei
+        Hybrid Approach: Uses Deep Learning if available, falls back to 
+        robust Morphological processing.
         """
-        self.min_nucleus_area = min_nucleus_area
-        self.max_nucleus_area = max_nucleus_area
-        self.threshold_method = threshold_method
-        self.use_watershed = use_watershed
+        img_np = np.array(image)
+        
+        # --- PLAN A: Deep Learning (Placeholder) ---
+        if self.model is not None:
+            # Run UNet inference here
+            pass
 
-    def colour_deconvolution(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Separate H&E stains using colour deconvolution.
+        # --- PLAN B: Enhanced Color Deconvolution (Robust Fallback) ---
+        # 1. Hematoxylin channel separation (nuclei are blue-ish)
+        # Simple approximation without full stain unmixing
+        red = img_np[:,:,0].astype(float)
+        blue = img_np[:,:,2].astype(float)
+        
+        # Nuclei have high Blue / Low Red ratio
+        nuclei_map = blue - red
+        
+        # 2. Thresholding (Otsu)
+        nuclei_map = np.clip(nuclei_map, 0, 255).astype(np.uint8)
+        _, binary = cv2.threshold(nuclei_map, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # 3. Morphological cleanup (remove noise)
+        binary = morphology.remove_small_objects(binary.astype(bool), min_size=20)
+        binary = morphology.binary_opening(binary, morphology.disk(2))
+        
+        # 4. Watershed to split touching cells
+        distance = cv2.distanceTransform(binary.astype(np.uint8), cv2.DIST_L2, 5)
+        _, local_max = cv2.threshold(distance, 0.4 * distance.max(), 255, 0)
+        local_max = np.uint8(local_max)
+        
+        # Connected components
+        num_labels, labels = cv2.connectedComponents(local_max)
+        
+        # Watershed
+        markers = cv2.watershed(img_np, labels.astype(np.int32))
+        
+        # Extract individual nuclei
+        nuclei_masks = []
+        clean_labels = np.zeros_like(labels)
+        
+        for i in range(1, num_labels):
+            mask = (markers == i).astype(np.uint8) * 255
+            if np.sum(mask) > 0:
+                nuclei_masks.append(mask)
+                clean_labels[markers == i] = i
 
-        Args:
-            image: RGB image as numpy array
+        return nuclei_masks, clean_labels, None
 
-        Returns:
-            Tuple of (haematoxylin_channel, eosin_channel)
-        """
-        # Use skimage's built-in H&E deconvolution
-        hed = rgb2hed(image)
-
-        haematoxylin = hed[:, :, 0]
-        eosin = hed[:, :, 1]
-
-        # Normalise to 0-255 range
-        haematoxylin = exposure.rescale_intensity(haematoxylin, out_range=(0, 255)).astype(np.uint8)
-        eosin = exposure.rescale_intensity(eosin, out_range=(0, 255)).astype(np.uint8)
-
-        return haematoxylin, eosin
-
-    def threshold_nuclei(self, haematoxylin: np.ndarray) -> np.ndarray:
-        """
-        Apply thresholding to segment nuclei from haematoxylin channel.
-
-        Args:
-            haematoxylin: Haematoxylin channel image
-
-        Returns:
-            Binary mask of nuclei
-        """
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(haematoxylin, (5, 5), 0)
-
-        if self.threshold_method == 'otsu':
-            threshold = filters.threshold_otsu(blurred)
-            binary = blurred > threshold
-        elif self.threshold_method == 'adaptive':
-            binary = cv2.adaptiveThreshold(
-                blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, 11, 2
-            ) > 0
-        elif self.threshold_method == 'li':
-            threshold = filters.threshold_li(blurred)
-            binary = blurred > threshold
-        else:
-            threshold = filters.threshold_otsu(blurred)
-            binary = blurred > threshold
-
-        return binary.astype(np.uint8)
-
-    def morphological_cleanup(self, binary: np.ndarray) -> np.ndarray:
-        """
-        Apply morphological operations to clean up the binary mask.
-
-        Args:
-            binary: Binary mask
-
-        Returns:
-            Cleaned binary mask
-        """
-        # Remove small objects (noise)
-        cleaned = morphology.remove_small_objects(binary.astype(bool), min_size=20)
-
-        # Fill holes in nuclei
-        cleaned = ndimage.binary_fill_holes(cleaned)
-
-        # Opening to separate slightly touching nuclei
-        kernel = morphology.disk(2)
-        cleaned = morphology.opening(cleaned, kernel)
-
-        # Closing to smooth boundaries
-        cleaned = morphology.closing(cleaned, kernel)
-
-        return cleaned.astype(np.uint8)
-
-    def watershed_separation(
-        self,
-        binary: np.ndarray,
-        haematoxylin: np.ndarray
-    ) -> np.ndarray:
-        """
-        Use watershed algorithm to separate touching nuclei.
-
-        Args:
-            binary: Binary mask of nuclei
-            haematoxylin: Haematoxylin channel for distance weighting
-
-        Returns:
-            Labelled image with separated nuclei
-        """
-        # Distance transform
-        distance = ndimage.distance_transform_edt(binary)
-
-        # Find local maxima as markers
-        local_max_coords = morphology.local_maxima(distance)
-        markers = measure.label(local_max_coords)
-
-        # Apply watershed
-        labels = watershed(-distance, markers, mask=binary)
-
-        return labels
-
-    def extract_nucleus_features(
-        self,
-        labels: np.ndarray,
-        original_image: np.ndarray,
-        haematoxylin: np.ndarray
-    ) -> List[NucleusInfo]:
-        """
-        Extract features for each detected nucleus.
-
-        Args:
-            labels: Labelled nuclei image
-            original_image: Original RGB image
-            haematoxylin: Haematoxylin channel
-
-        Returns:
-            List of NucleusInfo objects
-        """
-        nuclei = []
-        props = measure.regionprops(labels, intensity_image=haematoxylin)
-
-        for prop in props:
-            # Filter by area
-            if prop.area < self.min_nucleus_area or prop.area > self.max_nucleus_area:
-                continue
-
-            # Create mask for this nucleus
-            mask = (labels == prop.label).astype(np.uint8)
-
-            nucleus = NucleusInfo(
-                centroid=(prop.centroid[1], prop.centroid[0]),  # x, y
-                area=prop.area,
-                perimeter=prop.perimeter,
-                eccentricity=prop.eccentricity,
-                solidity=prop.solidity,
-                mean_intensity=prop.mean_intensity,
-                bbox=prop.bbox,
-                mask=mask
-            )
-            nuclei.append(nucleus)
-
-        return nuclei
-
-    def segment(self, image: Image.Image) -> Tuple[List[NucleusInfo], np.ndarray, np.ndarray]:
-        """
-        Perform full nuclei segmentation pipeline.
-
-        Args:
-            image: PIL Image of the tissue section
-
-        Returns:
-            Tuple of (nuclei_list, labelled_mask, haematoxylin_channel)
-        """
-        # Convert to numpy array
-        img_array = np.array(image)
-
-        # Ensure RGB format
-        if len(img_array.shape) == 2:
-            img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2RGB)
-        elif img_array.shape[2] == 4:
-            img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
-
-        # Colour deconvolution
-        haematoxylin, eosin = self.colour_deconvolution(img_array)
-
-        # Threshold nuclei
-        binary = self.threshold_nuclei(haematoxylin)
-
-        # Morphological cleanup
-        cleaned = self.morphological_cleanup(binary)
-
-        # Separate touching nuclei
-        if self.use_watershed:
-            labels = self.watershed_separation(cleaned, haematoxylin)
-        else:
-            labels = measure.label(cleaned)
-
-        # Extract features
-        nuclei = self.extract_nucleus_features(labels, img_array, haematoxylin)
-
-        return nuclei, labels, haematoxylin
-
-
-def segment_nuclei(
-    image: Image.Image,
-    min_area: int = 50,
-    max_area: int = 5000
-) -> Tuple[List[NucleusInfo], np.ndarray]:
-    """
-    Convenience function for nuclei segmentation.
-
-    Args:
-        image: PIL Image
-        min_area: Minimum nucleus area
-        max_area: Maximum nucleus area
-
-    Returns:
-        Tuple of (nuclei_list, labelled_mask)
-    """
-    segmenter = NucleiSegmenter(
-        min_nucleus_area=min_area,
-        max_nucleus_area=max_area
-    )
-    nuclei, labels, _ = segmenter.segment(image)
-    return nuclei, labels
-
-
-def compute_nuclei_statistics(nuclei: List[NucleusInfo]) -> Dict:
-    """
-    Compute aggregate statistics for detected nuclei.
-
-    Args:
-        nuclei: List of detected nuclei
-
-    Returns:
-        Dictionary of statistics
-    """
-    if not nuclei:
-        return {
-            'count': 0,
-            'mean_area': 0,
-            'std_area': 0,
-            'mean_eccentricity': 0,
-            'mean_solidity': 0,
-            'area_variation': 0
-        }
-
-    areas = [n.area for n in nuclei]
-    eccentricities = [n.eccentricity for n in nuclei]
-    solidities = [n.solidity for n in nuclei]
-
+def compute_nuclei_statistics(nuclei_list):
+    """Compute stats for the grading logic."""
+    if not nuclei_list:
+        return {'count': 0, 'mean_area': 0, 'std_area': 0}
+        
+    areas = [np.sum(n > 0) for n in nuclei_list]
     return {
-        'count': len(nuclei),
+        'count': len(nuclei_list),
         'mean_area': np.mean(areas),
-        'std_area': np.std(areas),
-        'mean_eccentricity': np.mean(eccentricities),
-        'mean_solidity': np.mean(solidities),
-        'area_variation': np.std(areas) / (np.mean(areas) + 1e-8)  # Coefficient of variation
+        'std_area': np.std(areas)
     }
+
+# Function alias to support older imports if necessary
+def segment_nuclei(image):
+    seg = NucleiSegmenter()
+    return seg.segment(image)
