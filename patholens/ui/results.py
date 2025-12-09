@@ -40,22 +40,22 @@ def render_overview_tab(results, original_image):
     # --- Toggle UI ---
     col_ctrl1, col_ctrl2 = st.columns([1, 3])
     with col_ctrl1:
-        # Default to Absolute if key exists, otherwise Relative
+        # Default to Relative (first option)
         heatmap_mode = st.radio(
             "Visualization Mode",
-            ["Enhanced (Relative)", "True Risk (Absolute)"],
-            help="Enhanced: Stretches contrast so hotspots are visible even if low probability.\nTrue Risk: Shows raw probability (may be invisible if risk is low)."
+            ["Relative Probabilities", "Absolute Probabilities"],
+            help="Relative: Stretches contrast so hotspots are visible even if low probability.\nAbsolute: Shows raw probability (may be invisible if risk is low)."
         )
     
     # Determine which image to show
     # We check if the 'relative' key exists (added in pipeline update)
-    if "Enhanced" in heatmap_mode and 'heatmap_overlay_relative' in results:
+    if "Relative" in heatmap_mode and 'heatmap_overlay_relative' in results:
         display_img = results['heatmap_overlay_relative']
-        caption = "Enhanced Heatmap (Contrast Boosted)"
+        caption = "Relative Heatmap (Contrast Boosted)"
     else:
         # Fallback to standard overlay
         display_img = results['heatmap_overlay']
-        caption = "True Probability Heatmap (0-100% Scale)"
+        caption = "Absolute Probability Heatmap (0-100% Scale)"
 
     # --- Image Display ---
     col1, col2 = st.columns(2)

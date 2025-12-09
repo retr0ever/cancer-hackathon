@@ -98,9 +98,11 @@ def train_model():
         scheduler.step()
 
     # 5. Save the 'Brain'
-    save_path = "models/patholens_model.pth"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    save_path = os.path.join(script_dir, "models", "patholens_model.pth")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(model.state_dict(), save_path)
-    print(f"Model saved to {save_path}")
+    print(f"Model saved to {os.path.relpath(save_path)}")
 
 if __name__ == '__main__':
     train_model()
